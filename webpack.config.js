@@ -34,12 +34,16 @@ module.exports = {
         new CopyPlugin({
             patterns: [
                 { from: "manifest.json", to: "../manifest.json" },
+                { from: "Llama_TOS/*",  to: "../", context: "public/"}
             ],
         }),
         ...getHtmlPlugins(["index"]),
     ],
     resolve: {
         extensions: [".tsx", ".ts", ".js"],
+        alias: {
+            "@huggingface/transformers":  path.resolve(__dirname, 'node_modules/@huggingface/transformers')
+        }
     },
     output: {
         path: path.join(__dirname, "dist/js"),
