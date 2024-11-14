@@ -34,7 +34,6 @@ module.exports = {
         new CopyPlugin({
             patterns: [
                 { from: "manifest.json", to: "../manifest.json" },
-                { from: "Llama_TOS/*",  to: "../", context: "public/"}
             ],
         }),
         ...getHtmlPlugins(["index"]),

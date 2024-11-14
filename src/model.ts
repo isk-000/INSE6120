@@ -1,20 +1,16 @@
-import { AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizer, PreTrainedModel } from '@huggingface/transformers';
+import { pipeline, PipelineType, Text2TextGenerationPipeline } from '@huggingface/transformers';
 
 export class Model{
-  static model_name: string = "Llama_TOS";
-  static tokenizer: PreTrainedTokenizer;
-  static model: PreTrainedModel;
-  
+  static model_name: string = "Xenova/LaMini-Flan-T5-783M";
+  static task: PipelineType = "text2text-generation";
+  static model: Text2TextGenerationPipeline;
   /**
    * This function is used to retrive the tokenizer and and the model
-   * @returns an tuple containg the tokenizer and the model
+   * @returns the model to use for text generation
    */
-  static async getInstances(): Promise<[PreTrainedTokenizer, PreTrainedModel]>{
-    if (this.tokenizer === undefined || this.model === undefined) {
-      this.tokenizer = await AutoTokenizer.from_pretrained(this.model_name);
-      this.model = await AutoModelForCausalLM.from_pretrained(this.model_name);
-    }
+  static async getInstance(progress_callback?: Function): Promise<Text2TextGenerationPipeline>{
+    this.model = await pipeline(this.task, this.model_name, {progress_callback: progress_callback, device: "wasm", dtype:"q8"}) as Text2TextGenerationPipeline;
 
-    return [this.tokenizer, this.model];
+    return this.model;
   }
 }

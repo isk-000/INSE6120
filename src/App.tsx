@@ -2,18 +2,18 @@
 import React, { useState, useEffect } from 'react';
 
 import { Model } from './model';
-import { setEnviromnent } from './settings';
 
 import './App.css';
+import { Text2TextGenerationOutput } from '@huggingface/transformers';
 
 const App: React.FC = () => {
   // State representing the message that the Model should output
   const [message, setMessage] = useState<string | null>(null);
 
   //set the enviromnt for the model to work
-  useEffect(() => {
-    setEnviromnent();
-  }, []);
+  // useEffect(() => {
+  //   setEnviromnent();
+  // }, []);
 
   /**
    * This function is used as button click handler to start the inference process of the LLM model
@@ -21,9 +21,16 @@ const App: React.FC = () => {
    * When the user opens a web page
    */
   const handleButtonClick = async () => {
-    let [tokenizer, inferenceModel] = await Model.getInstances();
-    let output = await tokenizer("This is the promt that will be sent to the model");
+    let model = await Model.getInstance(()=> {
+      setMessage("Model Is running");
+    });
+    
+    const txt = "Can you summarize the following privacy policy: Cookies and Other Tracking Technologies: Atlassian and our third-party partners, such as our advertising and analytics partners, use cookies and other tracking technologies (e.g., web beacons, device identifiers and pixels) to provide functionality and to recognize you across different Services and devices. For more information, please see our Cookies and Tracking Notice, which includes information on how to control or opt out of these cookies and tracking technologies. Please refer to Loom's Cookie Policy for details on cookies and tracking technologies used within Loom products and websites";
 
+    let output = await model(txt, {max_length: 1000}) as Text2TextGenerationOutput;
+
+    setMessage(output[0].generated_text);
+    
   }
 
   /**
