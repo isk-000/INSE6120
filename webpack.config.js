@@ -40,9 +40,6 @@ module.exports = {
     ],
     resolve: {
         extensions: [".tsx", ".ts", ".js"],
-        alias: {
-            "@huggingface/transformers":  path.resolve(__dirname, 'node_modules/@huggingface/transformers')
-        }
     },
     output: {
         path: path.join(__dirname, "dist/js"),
