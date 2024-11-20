@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Model } from './model';
-import './App.css';
-import { Text2TextGenerationOutput } from '@huggingface/transformers';
-import { Oval, ThreeDots } from 'react-loading-icons';
+import React, { useState, useEffect, useRef } from "react";
+import { Model } from "./model";
+import "./App.css";
+import { Text2TextGenerationOutput } from "@huggingface/transformers";
+import { Oval, ThreeDots } from "react-loading-icons";
+import axios from "axios";
+import * as cheerio from "cheerio";
 
 const App: React.FC = () => {
   const [message, setMessage] = useState<React.ReactNode | null>(null);
@@ -12,23 +14,58 @@ const App: React.FC = () => {
   const [showAcceptReject, setShowAcceptReject] = useState(false);
   const [loadingText, setLoadingText] = useState<string>("Analyzing Page...");
   const abortControllerRef = useRef<AbortController | null>(null);
+  const [cachedPolicy, setCachedPolicy] = useState<string | null>(null); // Cache for scraped text
+  const [currentUrl, setCurrentUrl] = useState<string>("");
+
+  const getAndUpdateURL = () => {
+    if (chrome?.tabs) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]?.url) {
+          setCurrentUrl(tabs[0].url);
+        } else {
+          console.error("Could not retrieve the current tab's URL.");
+        }
+      });
+    } else {
+      console.error("Chrome Tabs API is unavailable.");
+    }
+  }
 
   useEffect(() => {
-    const handleUrlChange = () => {
-      handleInference();
-    };
+    handleInference();
+  }, [currentUrl]);
 
-    window.addEventListener("popstate", handleUrlChange);
-    window.addEventListener("hashchange", handleUrlChange);
 
-    handleInference(); // Trigger inference on initial load
-
-    return () => {
-      window.removeEventListener("popstate", handleUrlChange);
-      window.removeEventListener("hashchange", handleUrlChange);
-      abortControllerRef.current?.abort();
-    };
+  useEffect(() => {
+    getAndUpdateURL();
   }, []);
+
+  const scrapePrivacyPolicy = async (pageUrl: string): Promise<string> => {
+    try {
+      const response = await axios.get(pageUrl, { responseType: "text" });
+      const $ = cheerio.load(response.data);
+
+      const possibleSelectors = [
+        'div[id*="privacy"]',
+        'div[class*="privacy"]',
+        'a[href*="privacy"]',
+        'section:contains("Privacy Policy")',
+        'p:contains("This Privacy Policy")',
+      ];
+
+      for (const selector of possibleSelectors) {
+        const element = $(selector);
+        if (element.length) {
+          return element.text().trim();
+        }
+      }
+      return "Privacy policy content could not be located.";
+    } catch (error) {
+      console.error("Error scraping privacy policy:", error);
+      return "Failed to scrape privacy policy. Please check the URL.";
+    }
+  };
+
 
   const handleInference = async () => {
     if (abortControllerRef.current) {
@@ -49,9 +86,33 @@ const App: React.FC = () => {
         <ThreeDots stroke="#4fa94d" fill="transparent" width={50} height={10} />
       </div>
     );
-    setLoadingText("Analyzing Page...");
+    setLoadingText("Scraping and Analyzing Page...");
 
     try {
+      if (!currentUrl) {
+        setMessage("No URL detected. Please ensure you are on a valid webpage.");
+        setMessage("URL " + currentUrl)
+        setShowContinue(true);
+        return;
+      }
+
+      // Check Cache First
+      let privacyPolicyText = cachedPolicy;
+      if (!privacyPolicyText) {
+        privacyPolicyText = await scrapePrivacyPolicy(currentUrl);
+        setCachedPolicy(privacyPolicyText); // Cache the result
+      }
+
+      if (privacyPolicyText.startsWith("Failed")) {
+        setMessage(privacyPolicyText);
+        setShowContinue(true);
+        return;
+      }
+
+      setMessage("Privacy Policy Text Scraped. Processing...");
+      setMessage(privacyPolicyText)
+      setLoadingText("Running Inference...");
+
       let model = await Model.getInstance(
         () => {
           if (signal.aborted) throw new Error("Inference was cancelled");
@@ -59,10 +120,8 @@ const App: React.FC = () => {
         signal
       );
 
-      const txt = "Can you summarize the following privacy policy: Cookies and Other Tracking Technologies: Atlassian and our third-party partners, such as our advertising and analytics partners, use cookies and other tracking technologies (e.g., web beacons, device identifiers and pixels) to provide functionality and to recognize you across different Services and devices. For more information, please see our Cookies and Tracking Notice, which includes information on how to control or opt out of these cookies and tracking technologies. Please refer to Loom's Cookie Policy for details on cookies and tracking technologies used within Loom products and websites";
-
       if (!isCancelled) {
-        const output = await model(txt, { max_length: 1000 });
+        const output = await model(privacyPolicyText, { max_length: 1000 });
         const generatedText = (output as Text2TextGenerationOutput)[0]?.generated_text;
         setMessage(generatedText || "No output was generated.");
         setShowAcceptReject(true); // Show Accept/Reject buttons after inference completes
@@ -73,6 +132,7 @@ const App: React.FC = () => {
         setMessage("Inference cancelled");
       } else {
         console.error("Error during inference:", errorMessage);
+        setMessage("Error occurred during the process.");
       }
     } finally {
       setIsLoading(false);
@@ -115,7 +175,7 @@ const App: React.FC = () => {
       console.error("Chrome Tabs API is unavailable.");
       alert("Please close this tab manually.");
     }
-  };   
+  };
 
   const getMessageUI = (): JSX.Element => (
     <div className={`message AI`}>
