@@ -10,23 +10,23 @@ module.exports = {
     module: {
         rules: [
             {
-              test: /\.tsx?$/,
-               use: [
-                 {
-                  loader: "ts-loader",
-                   options: {
-                     compilerOptions: { noEmit: false },
-                    }
-                  }],
-               exclude: /node_modules/,
+                test: /\.tsx?$/,
+                use: [
+                    {
+                        loader: "ts-loader",
+                        options: {
+                            compilerOptions: { noEmit: false },
+                        }
+                    }],
+                exclude: /node_modules/,
             },
             {
-              exclude: /node_modules/,
-              test: /\.css$/i,
-               use: [
-                  "style-loader",
-                  "css-loader"
-               ]
+                exclude: /node_modules/,
+                test: /\.css$/i,
+                use: [
+                    "style-loader",
+                    "css-loader"
+                ]
             },
         ],
     },
@@ -40,6 +40,9 @@ module.exports = {
     ],
     resolve: {
         extensions: [".tsx", ".ts", ".js"],
+        alias: {
+            "@huggingface/transformers": path.resolve(__dirname, 'node_modules/@huggingface/transformers')
+        }
     },
     output: {
         path: path.join(__dirname, "dist/js"),
