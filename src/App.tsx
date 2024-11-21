@@ -51,6 +51,17 @@ const App: React.FC = () => {
         'a[href*="privacy"]',
         'section:contains("Privacy Policy")',
         'p:contains("This Privacy Policy")',
+        'h2[id*="privacy"]',                
+        'h2:contains("Privacy Policy")',
+        'h2:contains("Plain English Privacy Policy")',
+        'h1:contains("Privacy Policy")',
+        'h1:contains("Privacy Statement")',
+        'p[class*="text"]:contains("Privacy Policy")',  
+        'p[class*="privacy"]',                     
+        'p:contains("Privacy Policy")',
+        'meta[name="description"][content*="Privacy policy"]',
+        'title:contains("Privacy Policy")',
+        'title:contains("Privacy policy")',
       ];
 
       for (const selector of possibleSelectors) {
