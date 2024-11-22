@@ -5,6 +5,8 @@ import { Text2TextGenerationOutput } from "@huggingface/transformers";
 import { Oval, ThreeDots } from "react-loading-icons";
 import axios from "axios";
 import * as cheerio from "cheerio";
+import { HTTP_URL, USE_HTTP_REQUEST } from "./settings";
+import { HTTPResponse } from "./helperInterface";
 
 const App: React.FC = () => {
   const [message, setMessage] = useState<React.ReactNode | null>(null);
@@ -51,13 +53,13 @@ const App: React.FC = () => {
         'a[href*="privacy"]',
         'section:contains("Privacy Policy")',
         'p:contains("This Privacy Policy")',
-        'h2[id*="privacy"]',                
+        'h2[id*="privacy"]',
         'h2:contains("Privacy Policy")',
         'h2:contains("Plain English Privacy Policy")',
         'h1:contains("Privacy Policy")',
         'h1:contains("Privacy Statement")',
-        'p[class*="text"]:contains("Privacy Policy")',  
-        'p[class*="privacy"]',                     
+        'p[class*="text"]:contains("Privacy Policy")',
+        'p[class*="privacy"]',
         'p:contains("Privacy Policy")',
         'meta[name="description"][content*="Privacy policy"]',
         'title:contains("Privacy Policy")',
@@ -123,20 +125,38 @@ const App: React.FC = () => {
       setMessage("Privacy Policy Text Scraped. Processing...");
       setMessage(privacyPolicyText)
       setLoadingText("Running Inference...");
+      let generatedText = "";
 
-      let model = await Model.getInstance(
-        () => {
-          if (signal.aborted) throw new Error("Inference was cancelled");
-        },
-        signal
-      );
-
+      if (USE_HTTP_REQUEST === false) {
+        let model = await Model.getInstance(
+          () => {
+            if (signal.aborted) throw new Error("Inference was cancelled");
+          },
+          signal
+        );
       if (!isCancelled) {
         const output = await model(privacyPolicyText, { max_length: 1000 });
-        const generatedText = (output as Text2TextGenerationOutput)[0]?.generated_text;
-        setMessage(generatedText || "No output was generated.");
-        setShowAcceptReject(true); // Show Accept/Reject buttons after inference completes
+        generatedText = (output as Text2TextGenerationOutput)[0]?.generated_text;
       }
+    }
+    else {
+      let rawResponse = await fetch(HTTP_URL, {
+        method: "POST",
+        signal: signal,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({"privacy_policy": privacyPolicyText})
+      });
+
+      let response: HTTPResponse = await rawResponse.json();
+      generatedText = response.analysis;
+    }
+
+    setMessage(generatedText || "No output was generated.");
+    setShowAcceptReject(true); // Show Accept/Reject buttons after inference completes
+
     } catch (error) {
       const errorMessage = (error as Error)?.message || "Unknown error";
       if (errorMessage === "Inference was cancelled") {
