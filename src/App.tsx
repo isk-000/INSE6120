@@ -6,6 +6,8 @@ import { Oval, ThreeDots } from "react-loading-icons";
 import GaugeChart from "react-gauge-chart";
 import axios from "axios";
 import * as cheerio from "cheerio";
+import { HTTP_URL, USE_HTTP_REQUEST } from "./settings";
+import { HTTPResponse } from "./helperInterface";
 
 
 interface MatchedElement {
@@ -204,7 +206,8 @@ const App: React.FC = () => {
       setMessage("Privacy Policy Text Detected. Processing...");
       console.log("Matched Elements:", matchedElements);
       setLoadingText("Analyzing ...");
-  
+
+      let generatedText = "";
       // Step 3: Prompt engineering for AI model
       const prompt = `
   You are an AI privacy policy analyzer. Analyze the following privacy policy based on the criteria below:
@@ -225,30 +228,43 @@ const App: React.FC = () => {
   ### Privacy Policy Content:
   ${concatenatedText}
       `;
-  
-      const model = await Model.getInstance(
-        () => {
-          if (signal.aborted) throw new Error("Inference was cancelled");
-        },
-        signal
-      );
-  
-      if (!isCancelled) {
-        const output = await model(prompt, { max_length: 2000 });
-        const generatedText = (output as Text2TextGenerationOutput)[0]?.generated_text;
-        setMessage(generatedText || "No output was generated.");
-
-        const scoreMatch = generatedText.match(/(\d+(\.\d+)?) out of 10/);
-        if (scoreMatch) {
-          const extractedScore = parseFloat(scoreMatch[1]);
-          setScore(extractedScore); // Update score state
-        
-        } else {
-          setMessage("Could not extract a score from the analysis.");
+      if (USE_HTTP_REQUEST === false) {
+        const model = await Model.getInstance(
+          () => {
+            if (signal.aborted) throw new Error("Inference was cancelled");
+          },
+          signal
+        );
+        if (!isCancelled) {
+          const output = await model(prompt, { max_length: 2000 });
+          generatedText = (output as Text2TextGenerationOutput)[0]?.generated_text;
         }
-
-        setShowAcceptReject(true); // Show Accept/Reject buttons after inference completes
       }
+      else {
+        let rawResponse = await fetch(HTTP_URL, {
+          method: "POST",
+          signal: signal,
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({"privacy_policy": prompt})
+        });
+  
+        let response: HTTPResponse = await rawResponse.json();
+        generatedText = response.analysis;
+      }
+      setMessage(generatedText || "No output was generated.");
+
+      const scoreMatch = generatedText.match(/(\d+(\.\d+)?) out of 10/);
+      if (scoreMatch) {
+        const extractedScore = parseFloat(scoreMatch[1]);
+        setScore(extractedScore); // Update score state
+      
+      } else {
+        setMessage("Could not extract a score from the analysis.");
+      }
+      setShowAcceptReject(true); // Show Accept/Reject buttons after inference completes
     } catch (error) {
       const errorMessage = (error as Error)?.message || "Unknown error";
       console.error("Error during inference:", errorMessage);
