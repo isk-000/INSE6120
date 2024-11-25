@@ -1,10 +1,13 @@
 // model.ts
-import { pipeline, PipelineType, Text2TextGenerationPipeline } from '@huggingface/transformers';
+import { pipeline, PipelineType, Text2TextGenerationPipeline, TextClassificationPipeline, TextGenerationPipeline } from '@huggingface/transformers';
 
 export class Model{
-  static model_name: string = "Xenova/LaMini-Flan-T5-783M";
-  static task: PipelineType = "text2text-generation";
-  static model: Text2TextGenerationPipeline;
+  static model_name: string = "Xenova/Qwen1.5-1.8B";
+  static  scoring_model_name: string = "ayaalhaj/privacy-policy-analyzer";
+  static task: PipelineType = "text-generation";
+  static scoringTask: PipelineType = "text-classification";
+  static summaryModel: TextGenerationPipeline;
+  static scoringModel: TextClassificationPipeline;
 
   /**
    * This function is used to retrieve the tokenizer and model
@@ -12,12 +15,25 @@ export class Model{
    * @param signal - optional AbortSignal for cancellation
    * @returns the model to use for text generation
    */
-  static async getInstance(progress_callback?: Function, signal?: AbortSignal): Promise<Text2TextGenerationPipeline>{
+  static async getSummaryInstance(progress_callback?: Function, signal?: AbortSignal): Promise<TextGenerationPipeline>{
     if (signal?.aborted) {
       throw new Error("Model loading was cancelled");
     }
     
-    this.model = await pipeline(this.task, this.model_name, { progress_callback, device: "wasm", dtype: "q8" }) as Text2TextGenerationPipeline;
-    return this.model;
+    if (this.summaryModel === undefined)
+      this.summaryModel = await pipeline(this.task, this.model_name, { progress_callback, device: "wasm", dtype: "q8" }) as TextGenerationPipeline;
+    
+    return this.summaryModel;
+  }
+
+  static async getScoringInstance(progress_callback?: Function, signal?: AbortSignal): Promise<TextClassificationPipeline>{
+    if (signal?.aborted) {
+      throw new Error("Model loading was cancelled");
+    }
+
+    if (this.scoringModel === undefined)
+      this.scoringModel = await pipeline(this.scoringTask, this.scoring_model_name, {progress_callback, device: "wasm", dtype:"q8" }) as TextClassificationPipeline
+    
+    return this.scoringModel;
   }
 }

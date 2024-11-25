@@ -24,7 +24,7 @@ def analyze():
     
     privacy_policy = data.get(PRIVACY_POLICY_KEY, "")
     
-    inputs = tokenizer("Analyize this privacy policy and give me a score from 1 to 10: " + privacy_policy, return_tensors="pt")
+    inputs = tokenizer(privacy_policy, return_tensors="pt")
     outputs = model.generate(**inputs, max_new_tokens=100)
     
     return make_response({ANALYIS_KEY: tokenizer.decode(outputs[0])}, 200)

@@ -1,19 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Model } from "./model";
-import "./App.css";
-import { Text2TextGenerationOutput } from "@huggingface/transformers";
+import { TextClassificationOutput, TextGenerationOutput } from "@huggingface/transformers";
 import { Oval, ThreeDots } from "react-loading-icons";
 import GaugeChart from "react-gauge-chart";
 import axios from "axios";
 import * as cheerio from "cheerio";
+
+import { Model } from "./model";
 import { HTTP_URL, USE_HTTP_REQUEST } from "./settings";
-import { HTTPResponse } from "./helperInterface";
+import { HTTPResponse, MatchedElement, GenericObject } from "./helperInterface";
+import { scorePrompt, summaryPrompt, CATEGORIES_MAPPING } from "./constants";
 
-
-interface MatchedElement {
-  selector: string;
-  content: string;
-}
+import "./App.css";
 
 const App: React.FC = () => {
   const [message, setMessage] = useState<React.ReactNode | null>(null);
@@ -23,7 +20,7 @@ const App: React.FC = () => {
   const [showAcceptReject, setShowAcceptReject] = useState(false);
   const [loadingText, setLoadingText] = useState<string>("Analyzing Page...");
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [cachedPolicy, setCachedPolicy] = useState<string | null>(null); 
+  const [cachedPolicy, setCachedPolicy] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState<string>("");
   const [score, setScore] = useState<number | null>(null);
 
@@ -52,6 +49,10 @@ const App: React.FC = () => {
     }
   }, [currentUrl]);
 
+  const handleCancelingModelInference = (signal: AbortSignal) => {
+    if (signal.aborted) throw new Error("Inference was cancelled");
+  };
+
   const findPrivacyPolicyLink = async (pageUrl: string): Promise<string> => {
     try {
       const response = await axios.get(pageUrl, { responseType: "text" });
@@ -79,6 +80,26 @@ const App: React.FC = () => {
       return "Failed to find privacy policy link.";
     }
   };
+
+  const splitText = (text: string, maxLength: number = 512) => {
+    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text]; // Split into sentences
+    const chunks = [];
+    let currentChunk = "";
+
+    for (const sentence of sentences) {
+      if (currentChunk.length + sentence.length > maxLength) {
+        chunks.push(currentChunk.trim());
+        currentChunk = sentence;
+      } else {
+        currentChunk += sentence;
+      }
+    }
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
+    }
+
+    return chunks;
+  }
 
 
   const scrapePrivacyPolicy = async (pageUrl: string): Promise<{
@@ -122,7 +143,7 @@ const App: React.FC = () => {
 
       const relevantText: MatchedElement[] = [];
 
-  
+
       possibleSelectors.forEach((selector) => {
         $(selector).each((_, element) => {
           const text = $(element).text().trim();
@@ -135,14 +156,13 @@ const App: React.FC = () => {
         });
       });
 
-  
       const concatenatedText = relevantText
         .map((entry) => `${entry.content}`)
         .join("\n\n");
 
       return {
         concatenatedText: concatenatedText || "No relevant content found.",
-        matchedElements: relevantText, 
+        matchedElements: relevantText,
       };
     } catch (error) {
       console.error("Error scraping privacy policy:", error);
@@ -157,11 +177,11 @@ const App: React.FC = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-  
+
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     const { signal } = abortController;
-  
+
     setIsLoading(true);
     setIsCancelled(false);
     setShowContinue(false);
@@ -172,72 +192,96 @@ const App: React.FC = () => {
       </div>
     );
     setLoadingText("Finding Privacy Policy Link...");
-  
+
     try {
       if (!currentUrl) {
         setMessage("No URL detected. Please ensure you are on a valid webpage.");
         setShowContinue(true);
         return;
       }
-  
+
       // Step 1: Find Privacy Policy link
       const privacyPolicyLink = await findPrivacyPolicyLink(currentUrl);
-  
+
       if (privacyPolicyLink.startsWith("Failed") || privacyPolicyLink.includes("not found")) {
         setMessage(privacyPolicyLink);
         setShowContinue(true);
         return;
       }
-  
+
       console.log("Privacy Policy Link Found:", privacyPolicyLink);
       setLoadingText("Scraping Privacy Policy Content...");
-  
+
       // Step 2: Scrape the content of the Privacy Policy
       const { concatenatedText, matchedElements } = await scrapePrivacyPolicy(
         privacyPolicyLink
       );
-  
+
       if (concatenatedText.startsWith("Failed")) {
         setMessage(concatenatedText);
         setShowContinue(true);
         return;
       }
-  
+
       setMessage("Privacy Policy Text Detected. Processing...");
       console.log("Matched Elements:", matchedElements);
       setLoadingText("Analyzing ...");
 
       let generatedText = "";
+      let categoryValues: { [key: string]: [number, number] } = {};
+
       // Step 3: Prompt engineering for AI model
-      const prompt = `
-  You are an AI privacy policy analyzer. Analyze the following privacy policy based on the criteria below:
-  
-  1. Summarize the privacy policy in 2-3 sentences.
-  
-  2. Evaluate the policy in the following categories and provide a score (1-10) for each:
-     - **Clarity**: How understandable and user-friendly is the language and structure?
-     - **Transparency**: Does the policy clearly explain data collection, use, and sharing practices?
-     - **User Control**: How effectively does the policy enable users to manage their data (e.g., opt-out, deletion)?
-     - **Third-Party Disclosure**: Does the policy provide clear details about third-party involvement and responsibilities?
-     - **Specificity**: Does the policy describe data types, retention periods, and usage in detail?
-  
-  3. Calculate an **overall transparency score** as the average of the above categories.
-  
-  4. Provide an explanation for each category score, highlighting strengths and areas for improvement.
-  
-  ### Privacy Policy Content:
-  ${concatenatedText}
-      `;
+      const prompt = summaryPrompt(concatenatedText);
+
       if (USE_HTTP_REQUEST === false) {
-        const model = await Model.getInstance(
-          () => {
-            if (signal.aborted) throw new Error("Inference was cancelled");
-          },
+        const summaryModel = await Model.getSummaryInstance(
+          () => handleCancelingModelInference(signal),
           signal
         );
+
+        const scoreModel = await Model.getScoringInstance(
+          () => handleCancelingModelInference(signal),
+          signal
+        );
+
         if (!isCancelled) {
-          const output = await model(prompt, { max_length: 2000 });
-          generatedText = (output as Text2TextGenerationOutput)[0]?.generated_text;
+          const output = await summaryModel(prompt, { max_length: 2000 });
+          generatedText = (output as TextGenerationOutput)[0]?.generated_text as string;
+
+          let chunks = splitText(concatenatedText, 512);
+
+          const analysesOutput: TextClassificationOutput[] = [];
+          chunks.forEach(async (chunk: string) => {
+            const inputText = scorePrompt(chunk);
+            const response = await scoreModel(inputText, {
+              top_k: 50,        // Top-k sampling
+            });
+            analysesOutput.push(response as TextClassificationOutput);
+          });
+
+          analysesOutput.forEach((chunkOutput: TextClassificationOutput) => {
+            let chunkMaxValue = -1
+            let chunkMaxLabel: string[] = [];
+
+            chunkOutput.forEach((singleOutput) => {
+              if (chunkMaxValue < singleOutput.score) {
+                chunkMaxValue = 1 + (singleOutput.score * 4);
+                chunkMaxLabel = [CATEGORIES_MAPPING[singleOutput.label]];
+              }
+              else if (chunkMaxValue === singleOutput.score) {
+                chunkMaxLabel.push(CATEGORIES_MAPPING[singleOutput.label]);
+              }
+            });
+
+            chunkMaxLabel.forEach((chunkLabel) => {
+              if (categoryValues[chunkLabel] === undefined) {
+                categoryValues[chunkLabel] = [chunkMaxValue, 1];
+              }
+              else {
+                categoryValues[chunkLabel] = [categoryValues[chunkLabel][0] + chunkMaxValue, categoryValues[chunkLabel][1] + 1];
+              }
+            });
+          });
         }
       }
       else {
@@ -248,27 +292,31 @@ const App: React.FC = () => {
             'Accept': 'application/json',
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({"privacy_policy": prompt})
+          body: JSON.stringify({ "privacy_policy": prompt })
         });
-  
+
         let response: HTTPResponse = await rawResponse.json();
         generatedText = response.analysis;
       }
+
       setMessage(generatedText || "No output was generated.");
 
-      const scoreMatch = generatedText.match(/(\d+(\.\d+)?) out of 10/);
-      if (scoreMatch) {
-        const extractedScore = parseFloat(scoreMatch[1]);
-        setScore(extractedScore); // Update score state
-      
-      } else {
-        setMessage("Could not extract a score from the analysis.");
-      }
-      setShowAcceptReject(true); // Show Accept/Reject buttons after inference completes
+      let conciseCategroyValues: GenericObject = {};
+
+      Object.keys(categoryValues).forEach((category: string) => {
+        let [value, number] = categoryValues[category];
+        conciseCategroyValues[category] = Math.round(value / number);
+      })
+      setMessage(JSON.stringify(categoryValues))
+      const scoreMatch = Math.round(Object.values(conciseCategroyValues).reduce((accumulator, currentValue) => accumulator + currentValue, 0) / Object.values.length);
+      setScore(scoreMatch);
+
+      setShowAcceptReject(true);// Show Accept/Reject buttons after inference completes
     } catch (error) {
       const errorMessage = (error as Error)?.message || "Unknown error";
       console.error("Error during inference:", errorMessage);
       setMessage("Error occurred during the process.");
+      setMessage((error as Error)?.message);
     } finally {
       setIsLoading(false);
       if (isCancelled) {
@@ -276,8 +324,8 @@ const App: React.FC = () => {
       }
     }
   };
-  
-  
+
+
   const handleCancel = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -328,14 +376,14 @@ const App: React.FC = () => {
         <div style={{ width: "50%", margin: "0 auto" }}>
           <GaugeChart
             id="gauge-chart"
-            nrOfLevels={10} 
-            arcsLength={[0.2, 0.2, 0.2, 0.2, 0.2]} 
+            nrOfLevels={5}
             colors={["#FF5F6D", "#FFC371", "#FFEB3B", "#76C7C0", "#00C49F"]}
             hideText={true}
             textColor="#000"
             needleColor="#464A4F"
+            percent={score/5}
           />
-          <h2 style={{ textAlign: "center" }}>{score.toFixed(1)} / 10</h2>
+          <h2 style={{ textAlign: "center" }}>{score.toFixed(1)} / 5</h2>
         </div>
       )}
 
