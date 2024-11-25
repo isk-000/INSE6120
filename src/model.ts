@@ -2,7 +2,7 @@
 import { pipeline, PipelineType, Text2TextGenerationPipeline, TextClassificationPipeline, TextGenerationPipeline } from '@huggingface/transformers';
 
 export class Model{
-  static model_name: string = "Xenova/Qwen1.5-1.8B";
+  static model_name: string = "onnx-community/Qwen2.5-1.5B";
   static  scoring_model_name: string = "ayaalhaj/privacy-policy-analyzer";
   static task: PipelineType = "text-generation";
   static scoringTask: PipelineType = "text-classification";
