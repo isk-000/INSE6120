@@ -3,8 +3,15 @@ import { Model } from "./model";
 import "./App.css";
 import { Text2TextGenerationOutput } from "@huggingface/transformers";
 import { Oval, ThreeDots } from "react-loading-icons";
+import GaugeChart from "react-gauge-chart";
 import axios from "axios";
 import * as cheerio from "cheerio";
+
+
+interface MatchedElement {
+  selector: string;
+  content: string;
+}
 
 const App: React.FC = () => {
   const [message, setMessage] = useState<React.ReactNode | null>(null);
@@ -14,8 +21,10 @@ const App: React.FC = () => {
   const [showAcceptReject, setShowAcceptReject] = useState(false);
   const [loadingText, setLoadingText] = useState<string>("Analyzing Page...");
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [cachedPolicy, setCachedPolicy] = useState<string | null>(null); // Cache for scraped text
+  const [cachedPolicy, setCachedPolicy] = useState<string | null>(null); 
   const [currentUrl, setCurrentUrl] = useState<string>("");
+  const [score, setScore] = useState<number | null>(null);
+
 
   const getAndUpdateURL = () => {
     if (chrome?.tabs) {
@@ -29,18 +38,51 @@ const App: React.FC = () => {
     } else {
       console.error("Chrome Tabs API is unavailable.");
     }
-  }
-
-  useEffect(() => {
-    handleInference();
-  }, [currentUrl]);
-
+  };
 
   useEffect(() => {
     getAndUpdateURL();
   }, []);
 
-  const scrapePrivacyPolicy = async (pageUrl: string): Promise<string> => {
+  useEffect(() => {
+    if (currentUrl) {
+      handleInference();
+    }
+  }, [currentUrl]);
+
+  const findPrivacyPolicyLink = async (pageUrl: string): Promise<string> => {
+    try {
+      const response = await axios.get(pageUrl, { responseType: "text" });
+      const $ = cheerio.load(response.data);
+
+      const linkSelectors = [
+        "footer a[href*='privacy']",
+        "a:contains('Privacy Policy')",
+        "a:contains('privacy')",
+        "a:contains('Privacy Notice')",
+        "a:contains('Privacy')",
+        "a:contains('data protection')",
+      ];
+
+      for (const selector of linkSelectors) {
+        const link = $(selector).attr("href");
+        if (link) {
+          return link.startsWith("http") ? link : new URL(link, pageUrl).href;
+        }
+      }
+
+      return "Privacy policy link not found.";
+    } catch (error) {
+      console.error("Error finding privacy policy link:", error);
+      return "Failed to find privacy policy link.";
+    }
+  };
+
+
+  const scrapePrivacyPolicy = async (pageUrl: string): Promise<{
+    concatenatedText: string;
+    matchedElements: MatchedElement[];
+  }> => {
     try {
       const response = await axios.get(pageUrl, { responseType: "text" });
       const $ = cheerio.load(response.data);
@@ -51,43 +93,73 @@ const App: React.FC = () => {
         'a[href*="privacy"]',
         'section:contains("Privacy Policy")',
         'p:contains("This Privacy Policy")',
-        'h2[id*="privacy"]',                
+        'p:contains("Account Information.")',
+        'p:contains("Account Information.")',
+        'p:contains("privacy")',
+        'p:contains("personal data")',
+        'p:contains("parties")',
+        'p:contains("personal information")',
+        'p:contains("collect information")',
+        'p:contains("IP address")',
+        'p:contains("use the information")',
+        'p:contains("cookies")',
+        'h2[id*="privacy"]',
         'h2:contains("Privacy Policy")',
         'h2:contains("Plain English Privacy Policy")',
         'h1:contains("Privacy Policy")',
         'h1:contains("Privacy Statement")',
-        'p[class*="text"]:contains("Privacy Policy")',  
-        'p[class*="privacy"]',                     
+        'p[class*="text"]:contains("Privacy Policy")',
+        'p[class*="privacy"]',
         'p:contains("Privacy Policy")',
         'meta[name="description"][content*="Privacy policy"]',
         'title:contains("Privacy Policy")',
         'title:contains("Privacy policy")',
+        '#privacy-policy + p',
+        '#information_you_provide + p',
       ];
 
-      for (const selector of possibleSelectors) {
-        const element = $(selector);
-        if (element.length) {
-          return element.text().trim();
-        }
-      }
-      return "Privacy policy content could not be located.";
+      const relevantText: MatchedElement[] = [];
+
+  
+      possibleSelectors.forEach((selector) => {
+        $(selector).each((_, element) => {
+          const text = $(element).text().trim();
+          if (text) {
+            relevantText.push({
+              selector,
+              content: text,
+            });
+          }
+        });
+      });
+
+  
+      const concatenatedText = relevantText
+        .map((entry) => `${entry.content}`)
+        .join("\n\n");
+
+      return {
+        concatenatedText: concatenatedText || "No relevant content found.",
+        matchedElements: relevantText, 
+      };
     } catch (error) {
       console.error("Error scraping privacy policy:", error);
-      return "Failed to scrape privacy policy. Please check the URL.";
+      return {
+        concatenatedText: "Failed to scrape privacy policy. Please check the URL.",
+        matchedElements: [],
+      };
     }
   };
-
 
   const handleInference = async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-
+  
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     const { signal } = abortController;
-
-    // Reset States
+  
     setIsLoading(true);
     setIsCancelled(false);
     setShowContinue(false);
@@ -97,54 +169,90 @@ const App: React.FC = () => {
         <ThreeDots stroke="#4fa94d" fill="transparent" width={50} height={10} />
       </div>
     );
-    setLoadingText("Scraping and Analyzing Page...");
-
+    setLoadingText("Finding Privacy Policy Link...");
+  
     try {
       if (!currentUrl) {
         setMessage("No URL detected. Please ensure you are on a valid webpage.");
-        setMessage("URL " + currentUrl)
         setShowContinue(true);
         return;
       }
-
-      // Check Cache First
-      let privacyPolicyText = cachedPolicy;
-      if (!privacyPolicyText) {
-        privacyPolicyText = await scrapePrivacyPolicy(currentUrl);
-        setCachedPolicy(privacyPolicyText); // Cache the result
-      }
-
-      if (privacyPolicyText.startsWith("Failed")) {
-        setMessage(privacyPolicyText);
+  
+      // Step 1: Find Privacy Policy link
+      const privacyPolicyLink = await findPrivacyPolicyLink(currentUrl);
+  
+      if (privacyPolicyLink.startsWith("Failed") || privacyPolicyLink.includes("not found")) {
+        setMessage(privacyPolicyLink);
         setShowContinue(true);
         return;
       }
-
-      setMessage("Privacy Policy Text Scraped. Processing...");
-      setMessage(privacyPolicyText)
-      setLoadingText("Running Inference...");
-
-      let model = await Model.getInstance(
+  
+      console.log("Privacy Policy Link Found:", privacyPolicyLink);
+      setLoadingText("Scraping Privacy Policy Content...");
+  
+      // Step 2: Scrape the content of the Privacy Policy
+      const { concatenatedText, matchedElements } = await scrapePrivacyPolicy(
+        privacyPolicyLink
+      );
+  
+      if (concatenatedText.startsWith("Failed")) {
+        setMessage(concatenatedText);
+        setShowContinue(true);
+        return;
+      }
+  
+      setMessage("Privacy Policy Text Detected. Processing...");
+      console.log("Matched Elements:", matchedElements);
+      setLoadingText("Analyzing ...");
+  
+      // Step 3: Prompt engineering for AI model
+      const prompt = `
+  You are an AI privacy policy analyzer. Analyze the following privacy policy based on the criteria below:
+  
+  1. Summarize the privacy policy in 2-3 sentences.
+  
+  2. Evaluate the policy in the following categories and provide a score (1-10) for each:
+     - **Clarity**: How understandable and user-friendly is the language and structure?
+     - **Transparency**: Does the policy clearly explain data collection, use, and sharing practices?
+     - **User Control**: How effectively does the policy enable users to manage their data (e.g., opt-out, deletion)?
+     - **Third-Party Disclosure**: Does the policy provide clear details about third-party involvement and responsibilities?
+     - **Specificity**: Does the policy describe data types, retention periods, and usage in detail?
+  
+  3. Calculate an **overall transparency score** as the average of the above categories.
+  
+  4. Provide an explanation for each category score, highlighting strengths and areas for improvement.
+  
+  ### Privacy Policy Content:
+  ${concatenatedText}
+      `;
+  
+      const model = await Model.getInstance(
         () => {
           if (signal.aborted) throw new Error("Inference was cancelled");
         },
         signal
       );
-
+  
       if (!isCancelled) {
-        const output = await model(privacyPolicyText, { max_length: 1000 });
+        const output = await model(prompt, { max_length: 2000 });
         const generatedText = (output as Text2TextGenerationOutput)[0]?.generated_text;
         setMessage(generatedText || "No output was generated.");
+
+        const scoreMatch = generatedText.match(/(\d+(\.\d+)?) out of 10/);
+        if (scoreMatch) {
+          const extractedScore = parseFloat(scoreMatch[1]);
+          setScore(extractedScore); // Update score state
+        
+        } else {
+          setMessage("Could not extract a score from the analysis.");
+        }
+
         setShowAcceptReject(true); // Show Accept/Reject buttons after inference completes
       }
     } catch (error) {
       const errorMessage = (error as Error)?.message || "Unknown error";
-      if (errorMessage === "Inference was cancelled") {
-        setMessage("Inference cancelled");
-      } else {
-        console.error("Error during inference:", errorMessage);
-        setMessage("Error occurred during the process.");
-      }
+      console.error("Error during inference:", errorMessage);
+      setMessage("Error occurred during the process.");
     } finally {
       setIsLoading(false);
       if (isCancelled) {
@@ -152,7 +260,8 @@ const App: React.FC = () => {
       }
     }
   };
-
+  
+  
   const handleCancel = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -198,6 +307,21 @@ const App: React.FC = () => {
   return (
     <div className="App">
       <h1>Privacy Policy Analyzer</h1>
+
+      {score !== null && (
+        <div style={{ width: "50%", margin: "0 auto" }}>
+          <GaugeChart
+            id="gauge-chart"
+            nrOfLevels={10} 
+            arcsLength={[0.2, 0.2, 0.2, 0.2, 0.2]} 
+            colors={["#FF5F6D", "#FFC371", "#FFEB3B", "#76C7C0", "#00C49F"]}
+            hideText={true}
+            textColor="#000"
+            needleColor="#464A4F"
+          />
+          <h2 style={{ textAlign: "center" }}>{score.toFixed(1)} / 10</h2>
+        </div>
+      )}
 
       <div className="chat-window">
         {message !== null ? getMessageUI() : null}
