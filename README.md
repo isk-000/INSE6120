@@ -2,6 +2,8 @@
 
 **INSE6120 Project: Privacy Policy Analyzer** is a machine learning-powered Google Chrome Extension framework, built to simplify privacy policies, enabling users to understand and control their data-sharing preferences effectively.
 
+**LIVE DEMO: https://bit.ly/3ZonXpw**
+
 ## **Introduction**
 
 This project focuses on simplifying the complexity of privacy policies by leveraging Large Language Models. It provides a user-friendly framework that deconstructs intricate policy documents into concise, actionable insights, empowering users to make informed decisions about their data.
@@ -31,10 +33,6 @@ Project Team Members:
 - **[Maria Rizk](https://github.com/mariarizk)**
 
 Thank you to all the contributors for their hard work and dedication to the project.
-
-## **Code of Conduct**
-
-Please note that this project is released with a Contributor Code of Conduct. By participating in this project, you agree to abide by its terms. See the **[CODE_OF_CONDUCT.md](https://www.blackbox.ai/share/CODE_OF_CONDUCT.md)** file for more information.
 
 ## **FAQ**
 
