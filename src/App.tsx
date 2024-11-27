@@ -1,29 +1,28 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Model } from "./model";
-import "./App.css";
-import { Text2TextGenerationOutput } from "@huggingface/transformers";
+import { SummarizationOutput, TextClassificationOutput } from "@huggingface/transformers";
 import { Oval, ThreeDots } from "react-loading-icons";
 import GaugeChart from "react-gauge-chart";
 import axios from "axios";
 import * as cheerio from "cheerio";
+
+import { Model } from "./model";
 import { HTTP_URL, USE_HTTP_REQUEST } from "./settings";
-import { HTTPResponse } from "./helperInterface";
+import { HTTPResponse, MatchedElement, GenericObject } from "./helperInterface";
+import { scorePrompt, summaryPrompt, CATEGORIES_MAPPING, CATEGORY_TO_EMOJI } from "./constants";
 
-
-interface MatchedElement {
-  selector: string;
-  content: string;
-}
+import "./App.css";
 
 const App: React.FC = () => {
   const [message, setMessage] = useState<React.ReactNode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [categoryValues, setCategorValues] = useState<number[]>([]);
   const [isCancelled, setIsCancelled] = useState(false);
   const [showContinue, setShowContinue] = useState(false);
   const [showAcceptReject, setShowAcceptReject] = useState(false);
   const [loadingText, setLoadingText] = useState<string>("Analyzing Page...");
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [cachedPolicy, setCachedPolicy] = useState<string | null>(null); 
+  const [cachedPolicy, setCachedPolicy] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState<string>("");
   const [score, setScore] = useState<number | null>(null);
 
@@ -51,6 +50,10 @@ const App: React.FC = () => {
       handleInference();
     }
   }, [currentUrl]);
+
+  const handleCancelingModelInference = (signal: AbortSignal) => {
+    if (signal.aborted) throw new Error("Inference was cancelled");
+  };
 
   const findPrivacyPolicyLink = async (pageUrl: string): Promise<string> => {
     try {
@@ -80,78 +83,45 @@ const App: React.FC = () => {
     }
   };
 
+  const splitText = (text: string, maxLength: number = 512) => {
+    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text]; // Split into sentences
+    const chunks = [];
+    let currentChunk = "";
 
-  const scrapePrivacyPolicy = async (pageUrl: string): Promise<{
-    concatenatedText: string;
-    matchedElements: MatchedElement[];
-  }> => {
+    for (const sentence of sentences) {
+      if (currentChunk.length + sentence.length > maxLength) {
+        chunks.push(currentChunk.trim());
+        currentChunk = sentence;
+      } else {
+        currentChunk += sentence;
+      }
+    }
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
+    }
+
+    return chunks;
+  }
+
+
+  const fetchPrivacyPolicy = async (pageUrl: string): Promise<string> => {
     try {
       const response = await axios.get(pageUrl, { responseType: "text" });
       const $ = cheerio.load(response.data);
-
-      const possibleSelectors = [
-        'div[id*="privacy"]',
-        'div[class*="privacy"]',
-        'a[href*="privacy"]',
-        'section:contains("Privacy Policy")',
-        'p:contains("This Privacy Policy")',
-        'p:contains("Account Information.")',
-        'p:contains("Account Information.")',
-        'p:contains("privacy")',
-        'p:contains("personal data")',
-        'p:contains("parties")',
-        'p:contains("personal information")',
-        'p:contains("collect information")',
-        'p:contains("IP address")',
-        'p:contains("use the information")',
-        'p:contains("cookies")',
-        'h2[id*="privacy"]',
-        'h2:contains("Privacy Policy")',
-        'h2:contains("Plain English Privacy Policy")',
-        'h1:contains("Privacy Policy")',
-        'h1:contains("Privacy Statement")',
-        'p[class*="text"]:contains("Privacy Policy")',
-        'p[class*="privacy"]',
-        'p:contains("Privacy Policy")',
-        'meta[name="description"][content*="Privacy policy"]',
-        'title:contains("Privacy Policy")',
-        'title:contains("Privacy policy")',
-        '#privacy-policy + p',
-        '#information_you_provide + p',
-      ];
-
-      const relevantText: MatchedElement[] = [];
-
   
-      possibleSelectors.forEach((selector) => {
-        $(selector).each((_, element) => {
-          const text = $(element).text().trim();
-          if (text) {
-            relevantText.push({
-              selector,
-              content: text,
-            });
-          }
-        });
-      });
-
+      const fullText = $("body").text().trim();
   
-      const concatenatedText = relevantText
-        .map((entry) => `${entry.content}`)
-        .join("\n\n");
-
-      return {
-        concatenatedText: concatenatedText || "No relevant content found.",
-        matchedElements: relevantText, 
-      };
+      if (!fullText) {
+        throw new Error("Failed to fetch the privacy policy content. The page is empty.");
+      }
+  
+      return fullText;
     } catch (error) {
-      console.error("Error scraping privacy policy:", error);
-      return {
-        concatenatedText: "Failed to scrape privacy policy. Please check the URL.",
-        matchedElements: [],
-      };
+      console.error("Error fetching privacy policy:", error);
+      return "Failed to fetch privacy policy content. Please check the URL.";
     }
   };
+  
 
   const handleInference = async () => {
     if (abortControllerRef.current) {
@@ -180,7 +150,7 @@ const App: React.FC = () => {
         return;
       }
   
-      // Step 1: Find Privacy Policy link
+     
       const privacyPolicyLink = await findPrivacyPolicyLink(currentUrl);
   
       if (privacyPolicyLink.startsWith("Failed") || privacyPolicyLink.includes("not found")) {
@@ -190,81 +160,77 @@ const App: React.FC = () => {
       }
   
       console.log("Privacy Policy Link Found:", privacyPolicyLink);
-      setLoadingText("Scraping Privacy Policy Content...");
+      setLoadingText("Fetching Privacy Policy Content...");
   
-      // Step 2: Scrape the content of the Privacy Policy
-      const { concatenatedText, matchedElements } = await scrapePrivacyPolicy(
-        privacyPolicyLink
-      );
+
+      const privacyPolicyText = await fetchPrivacyPolicy(privacyPolicyLink);
   
-      if (concatenatedText.startsWith("Failed")) {
-        setMessage(concatenatedText);
+      if (privacyPolicyText.startsWith("Failed")) {
+        setMessage(privacyPolicyText);
         setShowContinue(true);
         return;
       }
   
       setMessage("Privacy Policy Text Detected. Processing...");
-      console.log("Matched Elements:", matchedElements);
-      setLoadingText("Analyzing ...");
-
+      setLoadingText("Analyzing...");
+  
       let generatedText = "";
-      // Step 3: Prompt engineering for AI model
-      const prompt = `
-  You are an AI privacy policy analyzer. Analyze the following privacy policy based on the criteria below:
+      let responseFinalScore = -1;
+      let categories: string[] = [];
+      let responseScores: number[] = [];
   
-  1. Summarize the privacy policy in 2-3 sentences.
+   
+      const prompt = summaryPrompt(privacyPolicyText);
   
-  2. Evaluate the policy in the following categories and provide a score (1-10) for each:
-     - **Clarity**: How understandable and user-friendly is the language and structure?
-     - **Transparency**: Does the policy clearly explain data collection, use, and sharing practices?
-     - **User Control**: How effectively does the policy enable users to manage their data (e.g., opt-out, deletion)?
-     - **Third-Party Disclosure**: Does the policy provide clear details about third-party involvement and responsibilities?
-     - **Specificity**: Does the policy describe data types, retention periods, and usage in detail?
-  
-  3. Calculate an **overall transparency score** as the average of the above categories.
-  
-  4. Provide an explanation for each category score, highlighting strengths and areas for improvement.
-  
-  ### Privacy Policy Content:
-  ${concatenatedText}
-      `;
       if (USE_HTTP_REQUEST === false) {
-        const model = await Model.getInstance(
-          () => {
-            if (signal.aborted) throw new Error("Inference was cancelled");
-          },
+        const summaryModel = await Model.getSummaryInstance(
+          () => handleCancelingModelInference(signal),
           signal
         );
+  
+        const scoreModel = await Model.getScoringInstance(
+          () => handleCancelingModelInference(signal),
+          signal
+        );
+  
         if (!isCancelled) {
-          const output = await model(prompt, { max_length: 2000 });
-          generatedText = (output as Text2TextGenerationOutput)[0]?.generated_text;
+          const output = await summaryModel(privacyPolicyText);
+  
+          generatedText = (output as SummarizationOutput)[0]?.summary_text as string;
+          const inputText = scorePrompt(privacyPolicyText);
+  
+          const response = await scoreModel(inputText, {
+            top_k: 50,
+          }) as TextClassificationOutput;
+  
+          categories = response.map((responseValue) => CATEGORIES_MAPPING[responseValue.label]);
+          responseScores = response.map((responseValue) => 1 + (responseValue.score * 4));
+          responseFinalScore = responseScores.reduce((acc, value) => acc + value) / responseScores.length;
         }
-      }
-      else {
-        let rawResponse = await fetch(HTTP_URL, {
+      } else {
+        const rawResponse = await fetch(HTTP_URL, {
           method: "POST",
           signal: signal,
           headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
+            Accept: "application/json",
+            "Content-Type": "application/json",
           },
-          body: JSON.stringify({"privacy_policy": prompt})
+          body: JSON.stringify({ privacy_policy: prompt }),
         });
   
-        let response: HTTPResponse = await rawResponse.json();
+        const response: HTTPResponse = await rawResponse.json();
         generatedText = response.analysis;
       }
+  
+      generatedText = generatedText.replace(/\bwe\b/gi, "They");
+      generatedText = generatedText.replace(/\bour\b/gi, "there");
+  
       setMessage(generatedText || "No output was generated.");
-
-      const scoreMatch = generatedText.match(/(\d+(\.\d+)?) out of 10/);
-      if (scoreMatch) {
-        const extractedScore = parseFloat(scoreMatch[1]);
-        setScore(extractedScore); // Update score state
-      
-      } else {
-        setMessage("Could not extract a score from the analysis.");
-      }
-      setShowAcceptReject(true); // Show Accept/Reject buttons after inference completes
+      setScore(Math.round(responseFinalScore));
+      setCategories(categories);
+      setCategorValues(responseScores);
+  
+      setShowAcceptReject(true); 
     } catch (error) {
       const errorMessage = (error as Error)?.message || "Unknown error";
       console.error("Error during inference:", errorMessage);
@@ -277,7 +243,8 @@ const App: React.FC = () => {
     }
   };
   
-  
+
+
   const handleCancel = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -317,8 +284,30 @@ const App: React.FC = () => {
     <div className={`message AI`}>
       <strong>{"AI"}:</strong>
       <div>{message}</div>
+      {categories.length !== 0 ? getCategoriesUI() : null}
     </div>
   );
+
+  const getCategoriesUI = (): JSX.Element => {
+    return (
+      <>
+        <br />
+        <div >
+          <b>Categories:</b>
+        </div>
+        <ul className="categories">
+          {categories.map((category: string, index: number) => {
+            return (
+              <li key={index}>
+                {category} : {CATEGORY_TO_EMOJI[Math.round(categoryValues[index])]}
+              </li>
+            );
+          })}
+        </ul>
+      </>
+    );
+  };
+  
 
   return (
     <div className="App">
@@ -328,14 +317,14 @@ const App: React.FC = () => {
         <div style={{ width: "50%", margin: "0 auto" }}>
           <GaugeChart
             id="gauge-chart"
-            nrOfLevels={10} 
-            arcsLength={[0.2, 0.2, 0.2, 0.2, 0.2]} 
+            nrOfLevels={5}
             colors={["#FF5F6D", "#FFC371", "#FFEB3B", "#76C7C0", "#00C49F"]}
             hideText={true}
             textColor="#000"
             needleColor="#464A4F"
+            percent={score / 5}
           />
-          <h2 style={{ textAlign: "center" }}>{score.toFixed(1)} / 10</h2>
+          <h2 style={{ textAlign: "center" }}>{score.toFixed(1)} / 5</h2>
         </div>
       )}
 
