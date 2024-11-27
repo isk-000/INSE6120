@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { TextClassificationOutput, TextGenerationOutput } from "@huggingface/transformers";
+import { SummarizationOutput, TextClassificationOutput } from "@huggingface/transformers";
 import { Oval, ThreeDots } from "react-loading-icons";
 import GaugeChart from "react-gauge-chart";
 import axios from "axios";
@@ -8,13 +8,15 @@ import * as cheerio from "cheerio";
 import { Model } from "./model";
 import { HTTP_URL, USE_HTTP_REQUEST } from "./settings";
 import { HTTPResponse, MatchedElement, GenericObject } from "./helperInterface";
-import { scorePrompt, summaryPrompt, CATEGORIES_MAPPING } from "./constants";
+import { scorePrompt, summaryPrompt, CATEGORIES_MAPPING, CATEGORY_TO_EMOJI } from "./constants";
 
 import "./App.css";
 
 const App: React.FC = () => {
   const [message, setMessage] = useState<React.ReactNode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [categoryValues, setCategorValues] = useState<number[]>([]);
   const [isCancelled, setIsCancelled] = useState(false);
   const [showContinue, setShowContinue] = useState(false);
   const [showAcceptReject, setShowAcceptReject] = useState(false);
@@ -228,7 +230,9 @@ const App: React.FC = () => {
       setLoadingText("Analyzing ...");
 
       let generatedText = "";
-      let categoryValues: { [key: string]: [number, number] } = {};
+      let responseFinalScore = -1;
+      let categories: string[] = []
+      let responseScores: number[] = []
 
       // Step 3: Prompt engineering for AI model
       const prompt = summaryPrompt(concatenatedText);
@@ -245,43 +249,19 @@ const App: React.FC = () => {
         );
 
         if (!isCancelled) {
-          const output = await summaryModel(prompt, { max_length: 2000 });
-          generatedText = (output as TextGenerationOutput)[0]?.generated_text as string;
+          const output = await summaryModel(concatenatedText);
 
-          let chunks = splitText(concatenatedText, 512);
+          generatedText = (output as SummarizationOutput)[0]?.summary_text as string;
+          const inputText = scorePrompt(concatenatedText);
 
-          const analysesOutput: TextClassificationOutput[] = [];
-          chunks.forEach(async (chunk: string) => {
-            const inputText = scorePrompt(chunk);
-            const response = await scoreModel(inputText, {
-              top_k: 50,        // Top-k sampling
-            });
-            analysesOutput.push(response as TextClassificationOutput);
-          });
+          const response = await scoreModel(inputText, {
+            top_k: 50,        // Top-k sampling
+          }) as TextClassificationOutput;
 
-          analysesOutput.forEach((chunkOutput: TextClassificationOutput) => {
-            let chunkMaxValue = -1
-            let chunkMaxLabel: string[] = [];
+          categories = response.map((responseValue) => CATEGORIES_MAPPING[responseValue.label])
+          responseScores = response.map((responseValue) => 1 + (responseValue.score * 4))
+          responseFinalScore = responseScores.reduce((acc, value) => acc + value) / responseScores.length;
 
-            chunkOutput.forEach((singleOutput) => {
-              if (chunkMaxValue < singleOutput.score) {
-                chunkMaxValue = 1 + (singleOutput.score * 4);
-                chunkMaxLabel = [CATEGORIES_MAPPING[singleOutput.label]];
-              }
-              else if (chunkMaxValue === singleOutput.score) {
-                chunkMaxLabel.push(CATEGORIES_MAPPING[singleOutput.label]);
-              }
-            });
-
-            chunkMaxLabel.forEach((chunkLabel) => {
-              if (categoryValues[chunkLabel] === undefined) {
-                categoryValues[chunkLabel] = [chunkMaxValue, 1];
-              }
-              else {
-                categoryValues[chunkLabel] = [categoryValues[chunkLabel][0] + chunkMaxValue, categoryValues[chunkLabel][1] + 1];
-              }
-            });
-          });
         }
       }
       else {
@@ -298,18 +278,14 @@ const App: React.FC = () => {
         let response: HTTPResponse = await rawResponse.json();
         generatedText = response.analysis;
       }
-
+      
+      generatedText = generatedText.replace(/\bwe\b/gi, "They");
+      generatedText = generatedText.replace(/\bour\b/gi, "there");
+      
       setMessage(generatedText || "No output was generated.");
-
-      let conciseCategroyValues: GenericObject = {};
-
-      Object.keys(categoryValues).forEach((category: string) => {
-        let [value, number] = categoryValues[category];
-        conciseCategroyValues[category] = Math.round(value / number);
-      })
-      setMessage(JSON.stringify(categoryValues))
-      const scoreMatch = Math.round(Object.values(conciseCategroyValues).reduce((accumulator, currentValue) => accumulator + currentValue, 0) / Object.values.length);
-      setScore(scoreMatch);
+      setScore(Math.round(responseFinalScore));
+      setCategories(categories)
+      setCategorValues(responseScores)
 
       setShowAcceptReject(true);// Show Accept/Reject buttons after inference completes
     } catch (error) {
@@ -365,8 +341,25 @@ const App: React.FC = () => {
     <div className={`message AI`}>
       <strong>{"AI"}:</strong>
       <div>{message}</div>
+      {categories.length !== 0 ? getCategoriesUI() : null}
     </div>
   );
+
+  const getCategoriesUI = (): JSX.Element => {
+    return (<>
+      <br />
+      <div>
+        <b>Catgories:</b>
+      </div>
+      <ul>
+        {categories.map((category: string, index: number) => {
+          return (<li>{category} : {CATEGORY_TO_EMOJI[Math.round(categoryValues[index])]}</li>);
+        })}
+      </ul>
+
+    </>
+    );
+  };
 
   return (
     <div className="App">
@@ -381,7 +374,7 @@ const App: React.FC = () => {
             hideText={true}
             textColor="#000"
             needleColor="#464A4F"
-            percent={score/5}
+            percent={score / 5}
           />
           <h2 style={{ textAlign: "center" }}>{score.toFixed(1)} / 5</h2>
         </div>

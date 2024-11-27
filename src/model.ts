@@ -1,12 +1,12 @@
 // model.ts
-import { pipeline, PipelineType, Text2TextGenerationPipeline, TextClassificationPipeline, TextGenerationPipeline } from '@huggingface/transformers';
+import { pipeline, PipelineType, SummarizationPipeline, Text2TextGenerationPipeline, TextClassificationPipeline, TextGenerationPipeline } from '@huggingface/transformers';
 
 export class Model{
-  static model_name: string = "onnx-community/Qwen2.5-1.5B";
-  static  scoring_model_name: string = "ayaalhaj/privacy-policy-analyzer";
-  static task: PipelineType = "text-generation";
+  static model_name: string = "ahmedaeb/distilbart-cnn-6-6-optimised";
+  static  scoring_model_name: string = "ayaalhaj/privacy-policy-analyzer_multilabel";
+  static task: PipelineType = "summarization";
   static scoringTask: PipelineType = "text-classification";
-  static summaryModel: TextGenerationPipeline;
+  static summaryModel: SummarizationPipeline;
   static scoringModel: TextClassificationPipeline;
 
   /**
@@ -15,13 +15,13 @@ export class Model{
    * @param signal - optional AbortSignal for cancellation
    * @returns the model to use for text generation
    */
-  static async getSummaryInstance(progress_callback?: Function, signal?: AbortSignal): Promise<TextGenerationPipeline>{
+  static async getSummaryInstance(progress_callback?: Function, signal?: AbortSignal): Promise<SummarizationPipeline>{
     if (signal?.aborted) {
       throw new Error("Model loading was cancelled");
     }
     
     if (this.summaryModel === undefined)
-      this.summaryModel = await pipeline(this.task, this.model_name, { progress_callback, device: "wasm", dtype: "q8" }) as TextGenerationPipeline;
+      this.summaryModel = await pipeline(this.task, this.model_name, { progress_callback, device: "wasm", dtype: "q8" }) as SummarizationPipeline;
     
     return this.summaryModel;
   }

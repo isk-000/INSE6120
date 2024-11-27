@@ -1,5 +1,5 @@
 export const summaryPrompt = (prompt: string) => `You are an AI privacy policy analyzer. Analyze the following privacy policy based on the criteria below:
-1. Summarize the privacy policy in 2-3 sentences.
+    1. Summarize the privacy policy in 2-3 sentences.
 ### Privacy Policy Content: 
 ${prompt}
 `;
@@ -19,4 +19,12 @@ export const CATEGORIES_MAPPING: {[key:string]: string} = {
     "LABEL_2": ACCESSIBILITY,
     "LABEL_3": SECURITY,
     "LABEL_4": COMPREHENSIVENESS
+};
+
+export const CATEGORY_TO_EMOJI : {[key:number]: string} = {
+    1 : "🟥",
+    2 : "🟧",
+    3 : "🟨",
+    4 : "🟦",
+    5 : "🟩"
 };
