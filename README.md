@@ -2,7 +2,7 @@
 
 **INSE6120 Project: Privacy Policy Analyzer** is a machine learning-powered Google Chrome Extension framework, built to simplify privacy policies, enabling users to understand and control their data-sharing preferences effectively.
 
-**LIVE DEMO: https://bit.ly/3ZonXpw**
+**LIVE DEMO: https://bit.ly/49dcflc**
 
 **Our fine-tuned model, which is hosted on HuggingFace: https://huggingface.co/ayaalhaj/privacy-policy-analyzer_multilabel**
 
