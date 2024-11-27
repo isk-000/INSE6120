@@ -4,6 +4,8 @@
 
 **LIVE DEMO: https://bit.ly/3ZonXpw**
 
+**Our fine-tuned model, which is hosted on HuggingFace: https://huggingface.co/ayaalhaj/privacy-policy-analyzer_multilabel**
+
 ## **Introduction**
 
 This project focuses on simplifying the complexity of privacy policies by leveraging Large Language Models. It provides a user-friendly framework that deconstructs intricate policy documents into concise, actionable insights, empowering users to make informed decisions about their data.
