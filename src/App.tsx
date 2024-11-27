@@ -104,86 +104,34 @@ const App: React.FC = () => {
   }
 
 
-  const scrapePrivacyPolicy = async (pageUrl: string): Promise<{
-    concatenatedText: string;
-    matchedElements: MatchedElement[];
-  }> => {
+  const fetchPrivacyPolicy = async (pageUrl: string): Promise<string> => {
     try {
       const response = await axios.get(pageUrl, { responseType: "text" });
       const $ = cheerio.load(response.data);
-
-      const possibleSelectors = [
-        'div[id*="privacy"]',
-        'div[class*="privacy"]',
-        'a[href*="privacy"]',
-        'section:contains("Privacy Policy")',
-        'p:contains("This Privacy Policy")',
-        'p:contains("Account Information.")',
-        'p:contains("Account Information.")',
-        'p:contains("privacy")',
-        'p:contains("personal data")',
-        'p:contains("parties")',
-        'p:contains("personal information")',
-        'p:contains("collect information")',
-        'p:contains("IP address")',
-        'p:contains("use the information")',
-        'p:contains("cookies")',
-        'h2[id*="privacy"]',
-        'h2:contains("Privacy Policy")',
-        'h2:contains("Plain English Privacy Policy")',
-        'h1:contains("Privacy Policy")',
-        'h1:contains("Privacy Statement")',
-        'p[class*="text"]:contains("Privacy Policy")',
-        'p[class*="privacy"]',
-        'p:contains("Privacy Policy")',
-        'meta[name="description"][content*="Privacy policy"]',
-        'title:contains("Privacy Policy")',
-        'title:contains("Privacy policy")',
-        '#privacy-policy + p',
-        '#information_you_provide + p',
-      ];
-
-      const relevantText: MatchedElement[] = [];
-
-
-      possibleSelectors.forEach((selector) => {
-        $(selector).each((_, element) => {
-          const text = $(element).text().trim();
-          if (text) {
-            relevantText.push({
-              selector,
-              content: text,
-            });
-          }
-        });
-      });
-
-      const concatenatedText = relevantText
-        .map((entry) => `${entry.content}`)
-        .join("\n\n");
-
-      return {
-        concatenatedText: concatenatedText || "No relevant content found.",
-        matchedElements: relevantText,
-      };
+  
+      const fullText = $("body").text().trim();
+  
+      if (!fullText) {
+        throw new Error("Failed to fetch the privacy policy content. The page is empty.");
+      }
+  
+      return fullText;
     } catch (error) {
-      console.error("Error scraping privacy policy:", error);
-      return {
-        concatenatedText: "Failed to scrape privacy policy. Please check the URL.",
-        matchedElements: [],
-      };
+      console.error("Error fetching privacy policy:", error);
+      return "Failed to fetch privacy policy content. Please check the URL.";
     }
   };
+  
 
   const handleInference = async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-
+  
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     const { signal } = abortController;
-
+  
     setIsLoading(true);
     setIsCancelled(false);
     setShowContinue(false);
@@ -194,105 +142,99 @@ const App: React.FC = () => {
       </div>
     );
     setLoadingText("Finding Privacy Policy Link...");
-
+  
     try {
       if (!currentUrl) {
         setMessage("No URL detected. Please ensure you are on a valid webpage.");
         setShowContinue(true);
         return;
       }
-
-      // Step 1: Find Privacy Policy link
+  
+     
       const privacyPolicyLink = await findPrivacyPolicyLink(currentUrl);
-
+  
       if (privacyPolicyLink.startsWith("Failed") || privacyPolicyLink.includes("not found")) {
         setMessage(privacyPolicyLink);
         setShowContinue(true);
         return;
       }
-
+  
       console.log("Privacy Policy Link Found:", privacyPolicyLink);
-      setLoadingText("Scraping Privacy Policy Content...");
+      setLoadingText("Fetching Privacy Policy Content...");
+  
 
-      // Step 2: Scrape the content of the Privacy Policy
-      const { concatenatedText, matchedElements } = await scrapePrivacyPolicy(
-        privacyPolicyLink
-      );
-
-      if (concatenatedText.startsWith("Failed")) {
-        setMessage(concatenatedText);
+      const privacyPolicyText = await fetchPrivacyPolicy(privacyPolicyLink);
+  
+      if (privacyPolicyText.startsWith("Failed")) {
+        setMessage(privacyPolicyText);
         setShowContinue(true);
         return;
       }
-
+  
       setMessage("Privacy Policy Text Detected. Processing...");
-      console.log("Matched Elements:", matchedElements);
-      setLoadingText("Analyzing ...");
-
+      setLoadingText("Analyzing...");
+  
       let generatedText = "";
       let responseFinalScore = -1;
-      let categories: string[] = []
-      let responseScores: number[] = []
-
-      // Step 3: Prompt engineering for AI model
-      const prompt = summaryPrompt(concatenatedText);
-
+      let categories: string[] = [];
+      let responseScores: number[] = [];
+  
+   
+      const prompt = summaryPrompt(privacyPolicyText);
+  
       if (USE_HTTP_REQUEST === false) {
         const summaryModel = await Model.getSummaryInstance(
           () => handleCancelingModelInference(signal),
           signal
         );
-
+  
         const scoreModel = await Model.getScoringInstance(
           () => handleCancelingModelInference(signal),
           signal
         );
-
+  
         if (!isCancelled) {
-          const output = await summaryModel(concatenatedText);
-
+          const output = await summaryModel(privacyPolicyText);
+  
           generatedText = (output as SummarizationOutput)[0]?.summary_text as string;
-          const inputText = scorePrompt(concatenatedText);
-
+          const inputText = scorePrompt(privacyPolicyText);
+  
           const response = await scoreModel(inputText, {
-            top_k: 50,        // Top-k sampling
+            top_k: 50,
           }) as TextClassificationOutput;
-
-          categories = response.map((responseValue) => CATEGORIES_MAPPING[responseValue.label])
-          responseScores = response.map((responseValue) => 1 + (responseValue.score * 4))
+  
+          categories = response.map((responseValue) => CATEGORIES_MAPPING[responseValue.label]);
+          responseScores = response.map((responseValue) => 1 + (responseValue.score * 4));
           responseFinalScore = responseScores.reduce((acc, value) => acc + value) / responseScores.length;
-
         }
-      }
-      else {
-        let rawResponse = await fetch(HTTP_URL, {
+      } else {
+        const rawResponse = await fetch(HTTP_URL, {
           method: "POST",
           signal: signal,
           headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
+            Accept: "application/json",
+            "Content-Type": "application/json",
           },
-          body: JSON.stringify({ "privacy_policy": prompt })
+          body: JSON.stringify({ privacy_policy: prompt }),
         });
-
-        let response: HTTPResponse = await rawResponse.json();
+  
+        const response: HTTPResponse = await rawResponse.json();
         generatedText = response.analysis;
       }
-      
+  
       generatedText = generatedText.replace(/\bwe\b/gi, "They");
       generatedText = generatedText.replace(/\bour\b/gi, "there");
-      
+  
       setMessage(generatedText || "No output was generated.");
       setScore(Math.round(responseFinalScore));
-      setCategories(categories)
-      setCategorValues(responseScores)
-
-      setShowAcceptReject(true);// Show Accept/Reject buttons after inference completes
+      setCategories(categories);
+      setCategorValues(responseScores);
+  
+      setShowAcceptReject(true); 
     } catch (error) {
       const errorMessage = (error as Error)?.message || "Unknown error";
       console.error("Error during inference:", errorMessage);
       setMessage("Error occurred during the process.");
-      setMessage((error as Error)?.message);
     } finally {
       setIsLoading(false);
       if (isCancelled) {
@@ -300,6 +242,7 @@ const App: React.FC = () => {
       }
     }
   };
+  
 
 
   const handleCancel = () => {
@@ -346,20 +289,25 @@ const App: React.FC = () => {
   );
 
   const getCategoriesUI = (): JSX.Element => {
-    return (<>
-      <br />
-      <div>
-        <b>Catgories:</b>
-      </div>
-      <ul>
-        {categories.map((category: string, index: number) => {
-          return (<li>{category} : {CATEGORY_TO_EMOJI[Math.round(categoryValues[index])]}</li>);
-        })}
-      </ul>
-
-    </>
+    return (
+      <>
+        <br />
+        <div >
+          <b>Categories:</b>
+        </div>
+        <ul className="categories">
+          {categories.map((category: string, index: number) => {
+            return (
+              <li key={index}>
+                {category} : {CATEGORY_TO_EMOJI[Math.round(categoryValues[index])]}
+              </li>
+            );
+          })}
+        </ul>
+      </>
     );
   };
+  
 
   return (
     <div className="App">

@@ -1,8 +1,24 @@
-/* Basic resets */
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+
+.message ul {
+  padding-left: 10px; 
+  margin: 0; 
+  list-style-position: inside; 
+}
+
+
+.message .categories {
+  padding-top: 10px; 
+}
+
+::-webkit-scrollbar {
+  display: none; 
 }
 
 .App {
