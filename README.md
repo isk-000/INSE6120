@@ -20,7 +20,7 @@ To install **INSE6120 Project: Privacy Policy Analyzer**, follow these steps:
 4. Build the project: **`npm run build`**
 5. Try the project: Launch Google Chrome in Developer mode, load the built **`dist`** folder as a Google Extension, and run it from the Extensions tab
 
-**NOTE: Running the framework the first time may take a bit longer than usual as afterwards, we use our caching mechanism to improve the latency.
+**NOTE: Running the framework the first time may take a bit longer than usual as afterwards, we use our caching mechanism to improve the latency.**
 
 ## **License**
 
